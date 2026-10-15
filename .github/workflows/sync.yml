@@ -1,0 +1,43 @@
+# Hourly: reads published event sheets from the shared Drive and commits events.json + images here.
+# GitHub Pages serves them to nova-robotics.org, so event changes never need a website deploy.
+name: Sync events
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch: # "Run workflow" button for an immediate sync
+
+permissions:
+  contents: write
+
+concurrency: sync
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Sync events from Drive
+        env:
+          GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+          DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+        run: node scripts/sync-events.mjs
+
+      - name: Commit changes
+        run: |
+          git config user.name "events-bot"
+          git config user.email "events-bot@users.noreply.github.com"
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "Sync events from Drive"
+          # GitHub pauses schedules in public repos after 60 days without commits; nudge it at 50
+          elif [ $(( $(date +%s) - $(git log -1 --format=%ct) )) -gt 4320000 ]; then
+            git commit --allow-empty -m "Keep scheduled sync alive"
+          else
+            exit 0
+          fi
+          git push
